@@ -1,0 +1,52 @@
+# .github/workflows/release.yml
+#
+# タグが push されたら自動で:
+#   1. ビルドして ZIP を作成
+#   2. GitHub Release を作成（リリースノート自動生成 + ZIP 添付）
+
+name: Release
+
+# ── トリガー: v で始まるタグが push されたとき ──
+on:
+  push:
+    tags:
+      - 'v*'
+
+# ── 権限: リリース作成に Contents write が必要 ──
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # ── 1. コードを取得 ──
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 全履歴を取得（リリースノート生成に必要）
+
+      # ── 2. タグからバージョン番号を抽出 ──
+      - name: Extract version from tag
+        id: version
+        run: |
+          # refs/tags/v1.2.3 → 1.2.3
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      # ── 3. ビルド ──
+      - name: Build
+        run: bash build.sh ${{ steps.version.outputs.version }}
+
+      # ── 4. GitHub Release 作成 + ZIP 添付 ──
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # リリースノートの自動生成を有効化
+          generate_release_notes: true
+          # ZIP ファイルを添付
+          files: |
+            release-practice-*.zip
+          # beta, rc, alpha を含むタグはプレリリースとして扱う
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') }}
