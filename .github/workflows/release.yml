@@ -3,6 +3,7 @@
 # タグが push されたら自動で:
 #   1. ビルドして ZIP を作成
 #   2. GitHub Release を作成（リリースノート自動生成 + ZIP 添付）
+#   3. Slack に通知
 
 name: Release
 
@@ -17,36 +18,86 @@ permissions:
   contents: write
 
 jobs:
+  # ── Job 1: ビルド & リリース作成 ──
   release:
     runs-on: ubuntu-latest
     steps:
-      # ── 1. コードを取得 ──
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 全履歴を取得（リリースノート生成に必要）
+          fetch-depth: 0
 
-      # ── 2. タグからバージョン番号を抽出 ──
       - name: Extract version from tag
         id: version
         run: |
-          # refs/tags/v1.2.3 → 1.2.3
           VERSION=${GITHUB_REF_NAME#v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracted version: $VERSION"
 
-      # ── 3. ビルド ──
       - name: Build
         run: bash build.sh ${{ steps.version.outputs.version }}
 
-      # ── 4. GitHub Release 作成 + ZIP 添付 ──
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # リリースノートの自動生成を有効化
           generate_release_notes: true
-          # ZIP ファイルを添付
           files: |
             release-practice-*.zip
-          # beta, rc, alpha を含むタグはプレリリースとして扱う
           prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') }}
+
+  # ── Job 2: Slack 通知 ──
+  notify:
+    runs-on: ubuntu-latest
+    needs: release
+    if: success()
+    steps:
+      - name: Get release info
+        id: release_info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} --jq '.body')
+          URL=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} --jq '.html_url')
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "🎉 ${{ github.ref_name }} をリリースしました",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(steps.release_info.outputs.body) }}
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "📋 リリースノート"
+                      },
+                      "url": "${{ steps.release_info.outputs.url }}"
+                    }
+                  ]
+                }
+              ]
+            }
