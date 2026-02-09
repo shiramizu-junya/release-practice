@@ -1,0 +1,17 @@
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+  categories:
+    - title: "🚀 新機能"
+      labels:
+        - enhancement
+    - title: "🐛 バグ修正"
+      labels:
+        - bug
+    - title: "📝 ドキュメント"
+      labels:
+        - documentation
+    - title: "🏗️ その他"
+      labels:
+        - "*"
